@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "Web-based 3270 mainframe terminal via c3270",
   "main": "dist/server.js",
+  "files": [
+    "dist",
+    "public"
+  ],
   "scripts": {
     "build": "esbuild src/server.ts --bundle --platform=node --packages=external --outfile=dist/server.js",
     "typecheck": "tsc --noEmit",

@@ -3,7 +3,6 @@ import http from 'http';
 import { Server, Socket } from 'socket.io';
 import * as pty from 'node-pty';
 import { IPty } from 'node-pty';
-import mainframes from '../mainframes.json';
 
 interface MainframeEntry {
     id: string;
@@ -57,8 +56,23 @@ function resolveEntry(entry: MainframeEntry): ResolvedEntry {
     };
 }
 
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+const configPath = process.env.MAINFRAMES_CONFIG
+    ?? path.join(os.homedir(), '.web3270', 'mainframes.json');
+
+if (!fs.existsSync(configPath)) {
+    console.error(`[!] Configuration file not found: ${configPath}`);
+    console.error(`[!] Create it or set MAINFRAMES_CONFIG=/path/to/mainframes.json`);
+    process.exit(1);
+}
+
+const mainframes: MainframeEntry[] = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+
 const registry = new Map<string, MainframeEntry>(
-    (mainframes as MainframeEntry[]).map(m => [m.id, m])
+    mainframes.map(m => [m.id, m])
 );
 
 const app = express();

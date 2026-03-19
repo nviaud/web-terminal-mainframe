@@ -79,6 +79,27 @@ npm run start:local    # build + run with DEFAULT_SERVER=local
 
 Frontend assets (`xterm.js`, `addon-fit.js`, `xterm.css`) are served directly from `node_modules` at runtime — no bundler, no CDN.
 
+## Deployment (tarball)
+
+Build a self-contained tarball (sources and `mainframes.json` excluded):
+
+```bash
+npm run build && npm pack
+# → web-terminal-mainframe-1.0.0.tgz (contains dist/ and public/ only)
+```
+
+On the production machine:
+
+```bash
+mkdir /opt/web3270 && cd /opt/web3270
+tar -xzf web-terminal-mainframe-1.0.0.tgz --strip-components=1
+npm install               # recompiles node-pty natively on this machine
+cp /path/to/mainframes.json .
+PORT=8080 node dist/server.js
+```
+
+> **Note:** `node-pty` is a native addon — `npm install` must run on the production machine (or a matching arch/OS) so it compiles against the right Node version. Requires `build-essential` (Linux) or Xcode CLT (macOS).
+
 ## Docker (local mainframe)
 
 To run the full stack locally — including a real MVS 3.8j mainframe via Hercules:
