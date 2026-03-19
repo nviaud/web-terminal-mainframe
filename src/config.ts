@@ -59,12 +59,40 @@ function parseZoweConfig(config: ZoweConfig): MainframeEntry[] {
     return entries;
 }
 
+function deepMerge(base: Record<string, any>, override: Record<string, any>): Record<string, any> {
+    const result = { ...base };
+    for (const [key, val] of Object.entries(override)) {
+        if (val && typeof val === 'object' && !Array.isArray(val) && typeof result[key] === 'object') {
+            result[key] = deepMerge(result[key], val);
+        } else {
+            result[key] = val;
+        }
+    }
+    return result;
+}
+
+function readJson(filePath: string): Record<string, any> {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+}
+
+function loadZoweConfig(configPath: string): ZoweConfig {
+    const base = readJson(configPath);
+    const userPath = configPath.replace(/\.json$/, '.user.json');
+
+    if (fs.existsSync(userPath)) {
+        console.log(`[+] Merging Zowe user config: ${userPath}`);
+        return deepMerge(base, readJson(userPath)) as ZoweConfig;
+    }
+
+    return base as ZoweConfig;
+}
+
 export function loadConfig(configPath: string): MainframeEntry[] {
-    const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const raw = readJson(configPath);
 
     if (typeof raw.$schema === 'string' && raw.$schema.toLowerCase().includes('zowe')) {
         console.log(`[+] Detected Zowe config format: ${configPath}`);
-        return parseZoweConfig(raw as ZoweConfig);
+        return parseZoweConfig(loadZoweConfig(configPath));
     }
 
     return raw as MainframeEntry[];

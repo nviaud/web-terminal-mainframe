@@ -1,0 +1,16 @@
+{
+  "$schema": "./zowe.schema.json",
+  "profiles": {
+    "prod": {
+      "properties": {
+        "user": "MYUSER"
+      }
+    },
+    "local": {
+      "properties": {
+        "host": "192.168.1.50",
+        "port": 3270
+      }
+    }
+  }
+}

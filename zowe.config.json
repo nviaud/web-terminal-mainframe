@@ -1,0 +1,41 @@
+{
+  "$schema": "./zowe.schema.json",
+  "profiles": {
+    "prod": {
+      "properties": {
+        "host": "mainframe.company.com",
+        "port": 23,
+        "user": "HERC01",
+        "rejectUnauthorized": false
+      },
+      "profiles": {
+        "zosmf": {
+          "type": "zosmf",
+          "properties": {
+            "port": 443
+          }
+        }
+      },
+      "secure": ["password"]
+    },
+    "dev": {
+      "properties": {
+        "host": "dev-mainframe.company.com",
+        "port": 2323,
+        "user": "HERC01",
+        "rejectUnauthorized": true
+      },
+      "secure": ["password"]
+    },
+    "local": {
+      "properties": {
+        "host": "127.0.0.1",
+        "port": 2323,
+        "rejectUnauthorized": true
+      }
+    }
+  },
+  "defaults": {
+    "zosmf": "prod.zosmf"
+  }
+}
