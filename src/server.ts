@@ -1,31 +1,16 @@
-import express from 'express';
 import http from 'http';
+import express from 'express';
 import { Server, Socket } from 'socket.io';
 import * as pty from 'node-pty';
 import { IPty } from 'node-pty';
-
-interface MainframeEntry {
-    id: string;
-    name: string;
-    hostname: string;
-    port: number | string;
-    secure: boolean;
-    user?: string;
-}
+import { loadConfig, resolveConfigPath, MainframeEntry } from './config';
 
 interface ResolvedEntry extends Omit<MainframeEntry, 'port'> {
-    hostname: string;
     port: number;
-    user?: string;
 }
 
 interface ConnectPayload {
     id: string;
-    cols: number;
-    rows: number;
-}
-
-interface ResizePayload {
     cols: number;
     rows: number;
 }
@@ -56,23 +41,18 @@ function resolveEntry(entry: MainframeEntry): ResolvedEntry {
     };
 }
 
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+const configPath = resolveConfigPath();
 
-const configPath = process.env.MAINFRAMES_CONFIG
-    ?? path.join(os.homedir(), '.web3270', 'mainframes.json');
-
-if (!fs.existsSync(configPath)) {
-    console.error(`[!] Configuration file not found: ${configPath}`);
-    console.error(`[!] Create it or set MAINFRAMES_CONFIG=/path/to/mainframes.json`);
+if (!configPath) {
+    console.error('[!] No configuration file found. Looked in:');
+    console.error('[!]   ~/.web3270/mainframes.json');
+    console.error('[!]   ~/.zowe/zowe.config.json');
+    console.error('[!] Create one or set MAINFRAMES_CONFIG=/path/to/file');
     process.exit(1);
 }
 
-const mainframes: MainframeEntry[] = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-
 const registry = new Map<string, MainframeEntry>(
-    mainframes.map(m => [m.id, m])
+    loadConfig(configPath).map(m => [m.id, m])
 );
 
 const app = express();
@@ -111,16 +91,13 @@ io.on('connection', (socket: Socket) => {
             return;
         }
 
-        // Resolve env vars at connect time so changes don't require a restart
         const entry = resolveEntry(raw);
         const { hostname, port, secure, user } = entry;
         const cols = payload.cols || 80;
         const rows = payload.rows || 43;
 
-        // c3270 accepts user@host:port format
         const target = user ? `${user}@${hostname}:${port}` : `${hostname}:${port}`;
-
-        const termArgs: string[] = [
+        const termArgs = [
             ...(secure ? ['-secure', '-noverifycert'] : []),
             '-model', '4',
             target,
@@ -134,7 +111,7 @@ io.on('connection', (socket: Socket) => {
                 cols,
                 rows,
                 cwd: process.env.HOME ?? process.cwd(),
-                env: process.env as Record<string, string>
+                env: process.env as Record<string, string>,
             });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
@@ -145,7 +122,6 @@ io.on('connection', (socket: Socket) => {
 
         socket.emit('connected', entry.name);
         shell.onData((data: string) => socket.emit('output', data));
-
         shell.onExit(({ exitCode }: { exitCode: number }) => {
             console.log(`[-] c3270 exited (code ${exitCode})`);
             socket.emit('disconnected', exitCode);
@@ -153,20 +129,15 @@ io.on('connection', (socket: Socket) => {
         });
     });
 
-    socket.on('input', (data: string) => {
-        if (shell) shell.write(data);
-    });
+    socket.on('input', (data: string) => { if (shell) shell.write(data); });
 
-    socket.on('resize', ({ cols, rows }: ResizePayload) => {
+    socket.on('resize', ({ cols, rows }: { cols: number; rows: number }) => {
         if (shell) shell.resize(cols, rows);
     });
 
     socket.on('disconnect', () => {
         console.log('[-] Browser session closed:', socket.id);
-        if (shell) {
-            shell.kill();
-            shell = null;
-        }
+        if (shell) { shell.kill(); shell = null; }
     });
 });
 
