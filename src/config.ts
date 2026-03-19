@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import logger from './logger';
 
 export interface MainframeEntry {
     id: string;
@@ -84,7 +85,7 @@ function loadZoweConfig(configPath: string): ZoweConfig {
     const userExists = fs.existsSync(userPath);
 
     if (baseExists && userExists) {
-        console.log(`[+] Merging Zowe user config: ${userPath}`);
+        logger.info(`Merging Zowe user config: ${userPath}`);
         return deepMerge(readJson(basePath), readJson(userPath)) as ZoweConfig;
     }
 
@@ -95,7 +96,7 @@ export function loadConfig(configPath: string): MainframeEntry[] {
     const raw = readJson(configPath);
 
     if (typeof raw.$schema === 'string' && raw.$schema.toLowerCase().includes('zowe')) {
-        console.log(`[+] Detected Zowe config format: ${configPath}`);
+        logger.info(`Detected Zowe config format: ${configPath}`);
         return parseZoweConfig(loadZoweConfig(configPath));
     }
 

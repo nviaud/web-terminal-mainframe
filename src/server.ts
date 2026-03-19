@@ -4,6 +4,7 @@ import { Server, Socket } from 'socket.io';
 import * as pty from 'node-pty';
 import { IPty } from 'node-pty';
 import { loadConfig, resolveConfigPath, MainframeEntry } from './config';
+import logger from './logger';
 
 interface ResolvedEntry extends Omit<MainframeEntry, 'port'> {
     port: number;
@@ -44,10 +45,10 @@ function resolveEntry(entry: MainframeEntry): ResolvedEntry {
 const configPath = resolveConfigPath();
 
 if (!configPath) {
-    console.error('[!] No configuration file found. Looked in:');
-    console.error('[!]   ~/.web3270/mainframes.json');
-    console.error('[!]   ~/.zowe/zowe.config.json');
-    console.error('[!] Create one or set MAINFRAMES_CONFIG=/path/to/file');
+    logger.error('No configuration file found. Looked in:');
+    logger.error('  ~/.web3270/mainframes.json');
+    logger.error('  ~/.zowe/zowe.config.json');
+    logger.error('Create one or set MAINFRAMES_CONFIG=/path/to/file');
     process.exit(1);
 }
 
@@ -73,7 +74,7 @@ app.get('/api/init', (_req, res) => {
 });
 
 io.on('connection', (socket: Socket) => {
-    console.log('[+] New browser session:', socket.id);
+    logger.info({ socketId: socket.id }, 'New browser session');
 
     let shell: IPty | null = null;
 
@@ -103,7 +104,7 @@ io.on('connection', (socket: Socket) => {
             target,
         ];
 
-        console.log(`[+] [${socket.id}] Connecting to "${entry.name}" (${target})`);
+        logger.info({ socketId: socket.id, target }, `Connecting to "${entry.name}"`);
 
         try {
             shell = pty.spawn('c3270', termArgs, {
@@ -115,7 +116,7 @@ io.on('connection', (socket: Socket) => {
             });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            console.error('[-] Failed to spawn c3270:', message);
+            logger.error({ socketId: socket.id }, `Failed to spawn c3270: ${message}`);
             socket.emit('error', 'Failed to start c3270. Is it installed?');
             return;
         }
@@ -123,7 +124,7 @@ io.on('connection', (socket: Socket) => {
         socket.emit('connected', entry.name);
         shell.onData((data: string) => socket.emit('output', data));
         shell.onExit(({ exitCode }: { exitCode: number }) => {
-            console.log(`[-] c3270 exited (code ${exitCode})`);
+            logger.info({ socketId: socket.id, exitCode }, 'c3270 exited');
             socket.emit('disconnected', exitCode);
             shell = null;
         });
@@ -136,12 +137,12 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('disconnect', () => {
-        console.log('[-] Browser session closed:', socket.id);
+        logger.info({ socketId: socket.id }, 'Browser session closed');
         if (shell) { shell.kill(); shell = null; }
     });
 });
 
 const PORT = parseInt(process.env.PORT ?? '8080', 10);
 server.listen(PORT, () => {
-    console.log(`[+] Web3270 listening on http://localhost:${PORT}`);
+    logger.info(`Web3270 listening on http://localhost:${PORT}`);
 });
