@@ -51,7 +51,6 @@ function resolveC3270Binary(): string {
     const candidates = [
         '/usr/bin/c3270',
         '/usr/local/bin/c3270',
-        '/opt/homebrew/bin/c3270',
         '/opt/local/bin/c3270',
     ];
 
@@ -195,6 +194,29 @@ app.get('/api/init', (_req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Process tracking — used to clean up on server shutdown
+// ---------------------------------------------------------------------------
+
+const activeSessions = new Set<IPty>();
+
+function killShell(s: IPty): void {
+    activeSessions.delete(s);
+    try { s.kill(); } catch { /* already exited */ }
+}
+
+process.on('SIGTERM', () => {
+    logger.info('SIGTERM received — killing active c3270 sessions');
+    for (const s of activeSessions) killShell(s);
+    server.close(() => process.exit(0));
+});
+
+process.on('SIGINT', () => {
+    logger.info('SIGINT received — killing active c3270 sessions');
+    for (const s of activeSessions) killShell(s);
+    server.close(() => process.exit(0));
+});
+
+// ---------------------------------------------------------------------------
 // Socket.IO connection handling
 // ---------------------------------------------------------------------------
 
@@ -209,7 +231,7 @@ io.on('connection', (socket: Socket) => {
 
     socket.on('connect_to_mainframe', (payload: ConnectPayload | null) => {
         if (shell) {
-            shell.kill();
+            killShell(shell);
             shell = null;
         }
 
@@ -269,12 +291,18 @@ io.on('connection', (socket: Socket) => {
             return;
         }
 
+        const spawnedShell = shell;
+        activeSessions.add(spawnedShell);
+
         socket.emit('connected', entry.name);
-        shell.onData((data: string) => socket.emit('output', data));
-        shell.onExit(({ exitCode }: { exitCode: number }) => {
+        spawnedShell.onData((data: string) => socket.emit('output', data));
+        spawnedShell.onExit(({ exitCode }: { exitCode: number }) => {
+            activeSessions.delete(spawnedShell);
             logger.info({ socketId: socket.id, exitCode }, 'c3270 exited');
+            // Only clear the outer reference if it still points to THIS process.
+            // A second connect_to_mainframe may have already replaced it.
+            if (shell === spawnedShell) shell = null;
             socket.emit('disconnected', exitCode);
-            shell = null;
         });
     });
 
@@ -296,7 +324,7 @@ io.on('connection', (socket: Socket) => {
 
     socket.on('disconnect', () => {
         logger.info({ socketId: socket.id }, 'Browser session closed');
-        if (shell) { shell.kill(); shell = null; }
+        if (shell) { killShell(shell); shell = null; }
     });
 });
 
