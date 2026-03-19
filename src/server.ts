@@ -72,6 +72,20 @@ function resolveC3270Binary(): string {
     }
 }
 
+/**
+ * Convert a string into a sequence of c3270 Key(U+XXXX) scripting actions.
+ *
+ * Using Key() per character instead of String() avoids c3270's argument
+ * parser misinterpreting characters like ')' that would terminate the
+ * String() action early.
+ */
+function toKeyActions(text: string): string {
+    return text
+        .split('')
+        .map(ch => `Key(U+${ch.charCodeAt(0).toString(16).padStart(4, '0').toUpperCase()})`)
+        .join('\r') + '\r';
+}
+
 /** Replace $VAR, ${VAR}, or ${VAR:-default} with the matching environment variable. */
 function resolveEnv(value: string): string {
     return value.replace(/\$\{([^}]+)\}|\$([A-Z_][A-Z0-9_]*)/g, (_, braced, bare) => {
@@ -95,6 +109,7 @@ function resolveEntry(entry: MainframeEntry): ResolvedEntry {
         hostname: resolveEnv(entry.hostname),
         port: parseInt(rawPort, 10),
         user: entry.user ? resolveEnv(entry.user) : undefined,
+        password: entry.password ? resolveEnv(entry.password) : undefined,
     };
 }
 
@@ -244,7 +259,7 @@ io.on('connection', (socket: Socket) => {
         }
 
         const entry = resolveEntry(raw);
-        const { hostname, port, secure, user, rejectUnauthorized = true } = entry;
+        const { hostname, port, secure, user, password, rejectUnauthorized = true } = entry;
 
         // Validate resolved values before building c3270 arguments
         if (!HOSTNAME_RE.test(hostname)) {
@@ -267,12 +282,16 @@ io.on('connection', (socket: Socket) => {
         const cols = clamp(Math.floor(payload.cols) || 80, 20, 500);
         const rows = clamp(Math.floor(payload.rows) || 43,  5, 200);
 
-        const target = user ? `${user}@${hostname}:${port}` : `${hostname}:${port}`;
+        // Build args WITHOUT the target so that user@host never appears in `ps aux`.
+        // The Connect() action is written to the pty after spawn instead.
         const termArgs = [
             ...(secure ? ['-secure', ...(rejectUnauthorized ? [] : ['-noverifycert'])] : []),
             '-model', '4',
-            target,
+            '-script',
         ];
+
+        // Connect string is sent over the pty — stays in memory, never in argv.
+        const connectTarget = user ? `${user}@${hostname}:${port}` : `${hostname}:${port}`;
 
         logger.info({ socketId: socket.id, name: entry.name }, `Connecting to "${entry.name}"`);
 
@@ -293,6 +312,16 @@ io.on('connection', (socket: Socket) => {
 
         const spawnedShell = shell;
         activeSessions.add(spawnedShell);
+
+        // Send the connect action via stdin — keeps credentials out of argv / ps.
+        // If a password is configured, wait for the first input field (the login screen)
+        // and type it automatically. The password is never written to argv or logs.
+        spawnedShell.write(`Connect(${connectTarget})\r`);
+        if (password) {
+            spawnedShell.write(`Wait(InputField)\r`);
+            spawnedShell.write(toKeyActions(password));
+            spawnedShell.write(`Enter()\r`);
+        }
 
         socket.emit('connected', entry.name);
         spawnedShell.onData((data: string) => socket.emit('output', data));

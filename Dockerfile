@@ -10,5 +10,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
+RUN mkdir -p /root/.web3270 && cp mainframes.json /root/.web3270/mainframes.json
+
 EXPOSE 8080
 CMD ["node", "dist/server.js"]

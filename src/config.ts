@@ -4,14 +4,22 @@ import path from 'path';
 import logger from './logger';
 
 export interface MainframeEntry {
+    /** Unique identifier used by the client to request a connection. Never exposed beyond id+name. */
     id: string;
+    /** Human-readable label shown in the server picker. */
     name: string;
+    /** Mainframe hostname or IP. Supports $VAR / ${VAR} env-var substitution. */
     hostname: string;
+    /** TN3270 port. Accepts a number or an env-var string such as "$MF_PORT". */
     port: number | string;
+    /** Whether to use TLS (-secure flag). */
     secure: boolean;
     /** When secure=true, controls whether c3270 verifies the server certificate. Defaults to true. */
     rejectUnauthorized?: boolean;
+    /** Optional username. Supports $VAR / ${VAR} env-var substitution. Never logged or sent as argv. */
     user?: string;
+    /** Optional password. Supports $VAR / ${VAR} env-var substitution. Never logged or sent as argv. */
+    password?: string;
 }
 
 interface ZoweProfile {
