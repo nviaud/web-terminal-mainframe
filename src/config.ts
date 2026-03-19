@@ -9,6 +9,8 @@ export interface MainframeEntry {
     hostname: string;
     port: number | string;
     secure: boolean;
+    /** When secure=true, controls whether c3270 verifies the server certificate. Defaults to true. */
+    rejectUnauthorized?: boolean;
     user?: string;
 }
 
@@ -44,6 +46,7 @@ function parseZoweConfig(config: ZoweConfig): MainframeEntry[] {
                 hostname: host,
                 port: props.port ?? 23,
                 secure: props.rejectUnauthorized === false ? false : !!props.rejectUnauthorized,
+                rejectUnauthorized: props.rejectUnauthorized ?? true,
                 user,
             });
         }
@@ -60,11 +63,13 @@ function parseZoweConfig(config: ZoweConfig): MainframeEntry[] {
     return entries;
 }
 
-function deepMerge(base: Record<string, any>, override: Record<string, any>): Record<string, any> {
+/** Deep-merge two plain objects. Depth is capped at 10 to prevent stack overflow from crafted configs. */
+function deepMerge(base: Record<string, any>, override: Record<string, any>, depth = 0): Record<string, any> {
+    if (depth > 10) return { ...base, ...override };
     const result = { ...base };
     for (const [key, val] of Object.entries(override)) {
         if (val && typeof val === 'object' && !Array.isArray(val) && typeof result[key] === 'object') {
-            result[key] = deepMerge(result[key], val);
+            result[key] = deepMerge(result[key], val, depth + 1);
         } else {
             result[key] = val;
         }
@@ -92,6 +97,29 @@ function loadZoweConfig(configPath: string): ZoweConfig {
     return readJson(baseExists ? basePath : userPath) as ZoweConfig;
 }
 
+function validateEntry(entry: unknown, index: number): MainframeEntry {
+    if (typeof entry !== 'object' || entry === null) {
+        throw new Error(`Config entry ${index} is not an object`);
+    }
+    const e = entry as Record<string, unknown>;
+    if (typeof e.id !== 'string' || !e.id) {
+        throw new Error(`Config entry ${index}: 'id' must be a non-empty string`);
+    }
+    if (typeof e.name !== 'string' || !e.name) {
+        throw new Error(`Config entry ${index}: 'name' must be a non-empty string`);
+    }
+    if (typeof e.hostname !== 'string' || !e.hostname) {
+        throw new Error(`Config entry ${index}: 'hostname' must be a non-empty string`);
+    }
+    if (typeof e.port !== 'number' && typeof e.port !== 'string') {
+        throw new Error(`Config entry ${index}: 'port' must be a number or env-var string`);
+    }
+    if (typeof e.secure !== 'boolean') {
+        throw new Error(`Config entry ${index}: 'secure' must be a boolean`);
+    }
+    return entry as MainframeEntry;
+}
+
 export function loadConfig(configPath: string): MainframeEntry[] {
     const raw = readJson(configPath);
 
@@ -100,7 +128,11 @@ export function loadConfig(configPath: string): MainframeEntry[] {
         return parseZoweConfig(loadZoweConfig(configPath));
     }
 
-    return raw as MainframeEntry[];
+    if (!Array.isArray(raw)) {
+        throw new Error(`Config file must be a JSON array or a Zowe config object: ${configPath}`);
+    }
+
+    return raw.map((e, i) => validateEntry(e, i));
 }
 
 const CANDIDATE_PATHS = [
@@ -110,6 +142,12 @@ const CANDIDATE_PATHS = [
 ];
 
 export function resolveConfigPath(): string | null {
-    if (process.env.MAINFRAMES_CONFIG) return process.env.MAINFRAMES_CONFIG;
+    if (process.env.MAINFRAMES_CONFIG) {
+        const resolved = path.resolve(process.env.MAINFRAMES_CONFIG);
+        if (!resolved.endsWith('.json')) {
+            throw new Error(`MAINFRAMES_CONFIG must point to a .json file, got: "${resolved}"`);
+        }
+        return resolved;
+    }
     return CANDIDATE_PATHS.find(p => fs.existsSync(p)) ?? null;
 }
