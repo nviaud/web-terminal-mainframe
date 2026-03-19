@@ -1,0 +1,21 @@
+services:
+  web3270:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - DEFAULT_SERVER=local
+      - LOCAL_MAINFRAME_HOST=mvs
+    depends_on:
+      - mvs
+
+  mvs:
+    image: rattydave/docker-ubuntu-hercules-mvs
+    ports:
+      - "2323:2323"   # TN3270
+      - "8038:8038"   # Hercules web console (optional)
+    volumes:
+      - mvs-data:/opt/hercules/mvs
+
+volumes:
+  mvs-data:
