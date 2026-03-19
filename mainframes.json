@@ -19,7 +19,7 @@
     "id": "local",
     "name": "Local (TN3270)",
     "hostname": "${LOCAL_MAINFRAME_HOST:-127.0.0.1}",
-    "port": 2323,
+    "port": "${LOCAL_MAINFRAME_PORT:-2323}",
     "secure": false
   }
 ]

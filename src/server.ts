@@ -9,13 +9,14 @@ interface MainframeEntry {
     id: string;
     name: string;
     hostname: string;
-    port: number;
+    port: number | string;
     secure: boolean;
     user?: string;
 }
 
-interface ResolvedEntry extends MainframeEntry {
+interface ResolvedEntry extends Omit<MainframeEntry, 'port'> {
     hostname: string;
+    port: number;
     user?: string;
 }
 
@@ -30,18 +31,28 @@ interface ResizePayload {
     rows: number;
 }
 
-/** Replace $VAR or ${VAR} with the matching environment variable. */
+/** Replace $VAR, ${VAR}, or ${VAR:-default} with the matching environment variable. */
 function resolveEnv(value: string): string {
     return value.replace(/\$\{([^}]+)\}|\$([A-Z_][A-Z0-9_]*)/g, (_, braced, bare) => {
-        const name = braced ?? bare;
-        return process.env[name] ?? '';
+        if (braced) {
+            const sep = braced.indexOf(':-');
+            if (sep !== -1) {
+                const name = braced.slice(0, sep);
+                const def  = braced.slice(sep + 2);
+                return process.env[name] ?? def;
+            }
+            return process.env[braced] ?? '';
+        }
+        return process.env[bare] ?? '';
     });
 }
 
 function resolveEntry(entry: MainframeEntry): ResolvedEntry {
+    const rawPort = typeof entry.port === 'string' ? resolveEnv(entry.port) : String(entry.port);
     return {
         ...entry,
         hostname: resolveEnv(entry.hostname),
+        port: parseInt(rawPort, 10),
         user: entry.user ? resolveEnv(entry.user) : undefined,
     };
 }
@@ -55,16 +66,16 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 app.use(express.static('public'));
+app.use('/vendor', express.static('node_modules/@xterm'));
 
 const defaultServer = process.env.DEFAULT_SERVER ?? null;
 
 // Expose only id + name to the client — credentials and host stay server-side
-app.get('/api/mainframes', (_req, res) => {
-    res.json([...registry.values()].map(({ id, name }) => ({ id, name })));
-});
-
-app.get('/api/config', (_req, res) => {
-    res.json({ defaultServer });
+app.get('/api/init', (_req, res) => {
+    res.json({
+        servers: [...registry.values()].map(({ id, name }) => ({ id, name })),
+        defaultServer,
+    });
 });
 
 io.on('connection', (socket: Socket) => {
@@ -118,6 +129,7 @@ io.on('connection', (socket: Socket) => {
             return;
         }
 
+        socket.emit('connected', entry.name);
         shell.onData((data: string) => socket.emit('output', data));
 
         shell.onExit(({ exitCode }: { exitCode: number }) => {

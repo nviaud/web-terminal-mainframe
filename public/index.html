@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web Mainframe Terminal</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5/css/xterm.min.css" />
+    <title>Web3270</title>
+    <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -28,14 +28,8 @@
 
         header h1 { font-size: 1rem; color: #a0c4ff; letter-spacing: 1px; }
 
+        #connect-form { display: flex; gap: 8px; align-items: center; flex: 1; }
         #connect-form.hidden { display: none; }
-
-        #connect-form {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            flex: 1;
-        }
 
         #server-select {
             background: #0f3460;
@@ -60,7 +54,7 @@
             font-size: 0.85rem;
         }
 
-        button:hover { background: #1a4a8a; }
+        button:hover    { background: #1a4a8a; }
         button:disabled { opacity: 0.4; cursor: default; }
 
         #status {
@@ -72,9 +66,9 @@
             white-space: nowrap;
         }
 
-        #status.connected { background: #1a3a1a; color: #4caf50; }
+        #status.connected  { background: #1a3a1a; color: #4caf50; }
         #status.connecting { background: #2a2a1a; color: #ffc107; }
-        #status.error { background: #3a1a1a; color: #f44336; }
+        #status.error      { background: #3a1a1a; color: #f44336; }
 
         #terminal-container {
             flex: 1;
@@ -84,10 +78,7 @@
             flex-direction: column;
         }
 
-        #terminal {
-            flex: 1;
-            overflow: hidden;
-        }
+        #terminal { flex: 1; overflow: hidden; }
 
         /* xterm.js leaves a sub-row gap — match its background so it's invisible */
         #terminal .xterm-viewport { background: transparent !important; }
@@ -111,101 +102,9 @@
         <div id="terminal"></div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/xterm@5/lib/xterm.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+    <script src="/vendor/xterm/lib/xterm.js"></script>
+    <script src="/vendor/addon-fit/lib/addon-fit.js"></script>
     <script src="/socket.io/socket.io.js"></script>
-    <script>
-        const socket = io();
-
-        const term = new Terminal({
-            cursorBlink: true,
-            fontSize: 14,
-            fontFamily: '"Cascadia Code", "Courier New", monospace',
-            theme: {
-                background: '#0d0d1a',
-                foreground: '#c8c8d4',
-                cursor: '#a0c4ff',
-            }
-        });
-
-        const fitAddon = new FitAddon.FitAddon();
-        term.loadAddon(fitAddon);
-        term.open(document.getElementById('terminal'));
-        fitAddon.fit();
-
-        window.addEventListener('resize', () => {
-            fitAddon.fit();
-            socket.emit('resize', { cols: term.cols, rows: term.rows });
-        });
-
-        term.onData(data => socket.emit('input', data));
-
-        socket.on('output', data => term.write(data));
-
-        socket.on('disconnected', (code) => {
-            setStatus('Disconnected', '');
-            term.writeln('\r\n\x1b[33m--- Session ended ---\x1b[0m');
-            setConnected(false);
-        });
-
-        socket.on('error', (msg) => {
-            setStatus(msg, 'error');
-            setConnected(false);
-        });
-
-        const connectBtn = document.getElementById('connect-btn');
-        const disconnectBtn = document.getElementById('disconnect-btn');
-        const statusEl = document.getElementById('status');
-        const serverSelect = document.getElementById('server-select');
-
-        function setStatus(text, cls) {
-            statusEl.textContent = text;
-            statusEl.className = cls;
-        }
-
-        function setConnected(connected) {
-            connectBtn.disabled = connected;
-            disconnectBtn.disabled = !connected;
-            serverSelect.disabled = connected;
-        }
-
-        function connectTo(id) {
-            const name = serverSelect.querySelector(`option[value="${id}"]`)?.textContent ?? id;
-            term.clear();
-            setStatus(`Connecting to ${name}…`, 'connecting');
-            setConnected(true);
-            socket.emit('connect_to_mainframe', { id, cols: term.cols, rows: term.rows });
-            setStatus(name, 'connected');
-            term.focus();
-        }
-
-        Promise.all([
-            fetch('/api/mainframes').then(r => r.json()),
-            fetch('/api/config').then(r => r.json()),
-        ]).then(([servers, config]) => {
-            serverSelect.innerHTML = servers.map(s =>
-                `<option value="${s.id}">${s.name}</option>`
-            ).join('');
-
-            if (config.defaultServer) {
-                document.getElementById('connect-form').classList.add('hidden');
-                connectTo(config.defaultServer);
-            }
-        }).catch(() => {
-            serverSelect.innerHTML = '<option value="">Failed to load servers</option>';
-        });
-
-        connectBtn.addEventListener('click', () => {
-            const id = serverSelect.value;
-            if (!id) return;
-            connectTo(id);
-        });
-
-        disconnectBtn.addEventListener('click', () => {
-            socket.emit('connect_to_mainframe', null);
-            setStatus('Disconnected', '');
-            setConnected(false);
-        });
-    </script>
+    <script src="/app.js"></script>
 </body>
 </html>

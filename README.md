@@ -7,7 +7,7 @@ The server spawns `c3270` on demand and pipes its I/O to the browser over a WebS
 ## How it works
 
 1. The browser loads the dashboard and fetches the list of available servers
-2. The user clicks a server card
+2. The user selects a server from the dropdown
 3. The frontend emits a `connect_to_mainframe` event with the server id and terminal dimensions
 4. The server resolves the full host configuration (including env-var substitution) and spawns `c3270`
 5. `c3270` I/O is piped back to the browser over the socket — the terminal renders live in the page
@@ -61,13 +61,13 @@ Servers are defined in `mainframes.json`:
 
 ```bash
 npm install
-npm run dev            # tsx watch — rebuilds on save
+npm run dev            # tsx watch — reloads server on save
 npm run dev:local      # same, with DEFAULT_SERVER=local
 npm run dev:dev        # same, with DEFAULT_SERVER=dev
 npm run dev:prod       # same, with DEFAULT_SERVER=prod
 ```
 
-The server starts on `http://localhost:8080`.
+The server starts on `http://localhost:8080`. Client-side code (`public/app.js`) is plain JS — edit and refresh.
 
 ## Production build
 
@@ -76,6 +76,8 @@ npm run build          # compiles src/server.ts → dist/server.js
 npm start              # build + run
 npm run start:local    # build + run with DEFAULT_SERVER=local
 ```
+
+Frontend assets (`xterm.js`, `addon-fit.js`, `xterm.css`) are served directly from `node_modules` at runtime — no bundler, no CDN.
 
 ## Docker (local mainframe)
 

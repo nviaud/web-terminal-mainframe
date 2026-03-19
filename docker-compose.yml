@@ -6,16 +6,12 @@ services:
     environment:
       - DEFAULT_SERVER=local
       - LOCAL_MAINFRAME_HOST=mvs
+      - LOCAL_MAINFRAME_PORT=3270
     depends_on:
       - mvs
 
   mvs:
     image: rattydave/docker-ubuntu-hercules-mvs
     ports:
-      - "2323:2323"   # TN3270
+      - "2323:3270"   # TN3270 (container listens on 3270, exposed as 2323)
       - "8038:8038"   # Hercules web console (optional)
-    volumes:
-      - mvs-data:/opt/hercules/mvs
-
-volumes:
-  mvs-data:
