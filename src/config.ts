@@ -76,15 +76,19 @@ function readJson(filePath: string): Record<string, any> {
 }
 
 function loadZoweConfig(configPath: string): ZoweConfig {
-    const base = readJson(configPath);
-    const userPath = configPath.replace(/\.json$/, '.user.json');
+    const isUserFile = configPath.endsWith('.user.json');
+    const basePath = isUserFile ? configPath.replace('.user.json', '.json') : configPath;
+    const userPath = isUserFile ? configPath : configPath.replace(/\.json$/, '.user.json');
 
-    if (fs.existsSync(userPath)) {
+    const baseExists = fs.existsSync(basePath);
+    const userExists = fs.existsSync(userPath);
+
+    if (baseExists && userExists) {
         console.log(`[+] Merging Zowe user config: ${userPath}`);
-        return deepMerge(base, readJson(userPath)) as ZoweConfig;
+        return deepMerge(readJson(basePath), readJson(userPath)) as ZoweConfig;
     }
 
-    return base as ZoweConfig;
+    return readJson(baseExists ? basePath : userPath) as ZoweConfig;
 }
 
 export function loadConfig(configPath: string): MainframeEntry[] {
@@ -101,6 +105,7 @@ export function loadConfig(configPath: string): MainframeEntry[] {
 const CANDIDATE_PATHS = [
     path.join(os.homedir(), '.web3270', 'mainframes.json'),
     path.join(os.homedir(), '.zowe', 'zowe.config.json'),
+    path.join(os.homedir(), '.zowe', 'zowe.config.user.json'),
 ];
 
 export function resolveConfigPath(): string | null {
