@@ -16,7 +16,12 @@ export interface MainframeEntry {
     secure: boolean;
     /** When secure=true, controls whether c3270 verifies the server certificate. Defaults to true. */
     rejectUnauthorized?: boolean;
-    /** Optional username. Supports $VAR / ${VAR} env-var substitution. Never logged or sent as argv. */
+
+    // TODO implement autologin
+    /**
+     * Optional TSO/VTAM login username typed on the mainframe login screen after connection.
+     * Supports $VAR / ${VAR} env-var substitution. Never passed as a command-line argument.
+     */
     user?: string;
     /** Optional password. Supports $VAR / ${VAR} env-var substitution. Never logged or sent as argv. */
     password?: string;

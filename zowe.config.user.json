@@ -1,15 +1,28 @@
 {
   "$schema": "./zowe.schema.json",
   "profiles": {
-    "prod": {
+    "local1": {
       "properties": {
-        "user": "MYUSER"
+        "user": "$MAINFRAME_USER",
+        "password": "$MAINFRAME_PASSWORD"
       }
     },
-    "local": {
+    "local2": {
       "properties": {
-        "host": "192.168.1.50",
-        "port": 3270
+        "user": "$MAINFRAME_USER",
+        "password": "$MAINFRAME_PASSWORD"
+      }
+    },
+    "local3": {
+      "properties": {
+        "user": "$MAINFRAME_USER",
+        "password": "$MAINFRAME_PASSWORD"
+      }
+    },
+    "local4": {
+      "properties": {
+        "user": "$MAINFRAME_USER",
+        "password": "$MAINFRAME_PASSWORD"
       }
     }
   }

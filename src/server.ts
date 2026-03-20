@@ -23,9 +23,6 @@ interface ConnectPayload {
 /** Allowed characters in a hostname (covers DNS names, IPv4, and IPv6 bracket notation). */
 const HOSTNAME_RE = /^[a-zA-Z0-9.\-:[\]]+$/;
 
-/** Allowed characters in a username. */
-const USER_RE = /^[a-zA-Z0-9._@\-]+$/;
-
 /** Clamp n to [min, max]. */
 function clamp(n: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, n));
@@ -70,20 +67,6 @@ function resolveC3270Binary(): string {
         logger.error('c3270 not found. Install it or set C3270_PATH=/path/to/c3270');
         process.exit(1);
     }
-}
-
-/**
- * Convert a string into a sequence of c3270 Key(U+XXXX) scripting actions.
- *
- * Using Key() per character instead of String() avoids c3270's argument
- * parser misinterpreting characters like ')' that would terminate the
- * String() action early.
- */
-function toKeyActions(text: string): string {
-    return text
-        .split('')
-        .map(ch => `Key(U+${ch.charCodeAt(0).toString(16).padStart(4, '0').toUpperCase()})`)
-        .join('\r') + '\r';
 }
 
 /** Replace $VAR, ${VAR}, or ${VAR:-default} with the matching environment variable. */
@@ -195,8 +178,11 @@ if (requiredToken) {
 // Static files + API
 // ---------------------------------------------------------------------------
 
-app.use(express.static('public'));
-app.use('/vendor', express.static('node_modules/@xterm'));
+// Use __dirname-based absolute paths so the server works regardless of cwd.
+// dist/server.js lives in <root>/dist/, so root is one level up.
+const ROOT = path.join(__dirname, '..');
+app.use(express.static(path.join(ROOT, 'public')));
+app.use('/vendor', express.static(path.join(ROOT, 'node_modules', '@xterm')));
 
 const defaultServer = process.env.DEFAULT_SERVER ?? null;
 
@@ -219,17 +205,28 @@ function killShell(s: IPty): void {
     try { s.kill(); } catch { /* already exited */ }
 }
 
-process.on('SIGTERM', () => {
-    logger.info('SIGTERM received — killing active c3270 sessions');
-    for (const s of activeSessions) killShell(s);
-    server.close(() => process.exit(0));
-});
+let shuttingDown = false;
 
-process.on('SIGINT', () => {
-    logger.info('SIGINT received — killing active c3270 sessions');
+function shutdown(signal: string): void {
+    if (shuttingDown) return;
+    shuttingDown = true;
+
+    logger.info(`${signal} received — killing active c3270 sessions`);
     for (const s of activeSessions) killShell(s);
+
+    // Close Socket.IO connections first so the HTTP server can drain.
+    io.close();
     server.close(() => process.exit(0));
-});
+
+    // Force exit after 3 s if graceful shutdown stalls (e.g. hung socket).
+    setTimeout(() => {
+        logger.warn('Graceful shutdown timed out — forcing exit');
+        process.exit(1);
+    }, 3000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));
 
 // ---------------------------------------------------------------------------
 // Socket.IO connection handling
@@ -259,22 +256,23 @@ io.on('connection', (socket: Socket) => {
         }
 
         const entry = resolveEntry(raw);
-        const { hostname, port, secure, user, password, rejectUnauthorized = true } = entry;
+        const { hostname, port, secure, rejectUnauthorized = true } = entry;
 
-        // Validate resolved values before building c3270 arguments
+        // Validate resolved values before building c3270 arguments.
+        // These are server-side config errors the browser user cannot fix,
+        // so disconnect the socket immediately after reporting them.
+        const rejectConfig = (reason: string) => {
+            logger.error({ socketId: socket.id }, reason);
+            socket.emit('error', 'Server configuration error');
+            socket.disconnect(true);
+        };
+
         if (!HOSTNAME_RE.test(hostname)) {
-            logger.error({ socketId: socket.id }, 'Rejected connect: invalid hostname in config');
-            socket.emit('error', 'Server configuration error');
-            return;
-        }
-        if (user && !USER_RE.test(user)) {
-            logger.error({ socketId: socket.id }, 'Rejected connect: invalid user in config');
-            socket.emit('error', 'Server configuration error');
+            rejectConfig('Rejected connect: invalid hostname in config');
             return;
         }
         if (!Number.isInteger(port) || port < 1 || port > 65535) {
-            logger.error({ socketId: socket.id, port }, 'Rejected connect: invalid port in config');
-            socket.emit('error', 'Server configuration error');
+            rejectConfig(`Rejected connect: invalid port in config (${port})`);
             return;
         }
 
@@ -282,16 +280,12 @@ io.on('connection', (socket: Socket) => {
         const cols = clamp(Math.floor(payload.cols) || 80, 20, 500);
         const rows = clamp(Math.floor(payload.rows) || 43,  5, 200);
 
-        // Build args WITHOUT the target so that user@host never appears in `ps aux`.
-        // The Connect() action is written to the pty after spawn instead.
+        const target = `${hostname}:${port}`;
         const termArgs = [
             ...(secure ? ['-secure', ...(rejectUnauthorized ? [] : ['-noverifycert'])] : []),
             '-model', '4',
-            '-script',
+            target,
         ];
-
-        // Connect string is sent over the pty — stays in memory, never in argv.
-        const connectTarget = user ? `${user}@${hostname}:${port}` : `${hostname}:${port}`;
 
         logger.info({ socketId: socket.id, name: entry.name }, `Connecting to "${entry.name}"`);
 
@@ -312,16 +306,6 @@ io.on('connection', (socket: Socket) => {
 
         const spawnedShell = shell;
         activeSessions.add(spawnedShell);
-
-        // Send the connect action via stdin — keeps credentials out of argv / ps.
-        // If a password is configured, wait for the first input field (the login screen)
-        // and type it automatically. The password is never written to argv or logs.
-        spawnedShell.write(`Connect(${connectTarget})\r`);
-        if (password) {
-            spawnedShell.write(`Wait(InputField)\r`);
-            spawnedShell.write(toKeyActions(password));
-            spawnedShell.write(`Enter()\r`);
-        }
 
         socket.emit('connected', entry.name);
         spawnedShell.onData((data: string) => socket.emit('output', data));

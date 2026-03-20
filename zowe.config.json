@@ -1,41 +1,40 @@
 {
   "$schema": "./zowe.schema.json",
   "profiles": {
-    "prod": {
+    "local1": {
       "properties": {
-        "host": "mainframe.company.com",
-        "port": 23,
-        "user": "HERC01",
+        "host": "mvs1",
+        "port": 3270,
         "rejectUnauthorized": false
       },
-      "profiles": {
-        "zosmf": {
-          "type": "zosmf",
-          "properties": {
-            "port": 443
-          }
-        }
+      "secure": ["password"]
+    },
+    "local2": {
+      "properties": {
+        "host": "mvs2",
+        "port": 3270,
+        "rejectUnauthorized": false
       },
       "secure": ["password"]
     },
-    "dev": {
+    "local3": {
       "properties": {
-        "host": "dev-mainframe.company.com",
-        "port": 2323,
-        "user": "HERC01",
-        "rejectUnauthorized": true
+        "host": "mvs3",
+        "port": 3270,
+        "rejectUnauthorized": false
       },
       "secure": ["password"]
     },
-    "local": {
+    "local4": {
       "properties": {
-        "host": "127.0.0.1",
-        "port": 2323,
-        "rejectUnauthorized": true
-      }
+        "host": "mvs4",
+        "port": 3270,
+        "rejectUnauthorized": false
+      },
+      "secure": ["password"]
     }
   },
   "defaults": {
-    "zosmf": "prod.zosmf"
+    "zosmf": "local1"
   }
 }

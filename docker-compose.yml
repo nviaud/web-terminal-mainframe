@@ -4,14 +4,35 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DEFAULT_SERVER=local
-      - LOCAL_MAINFRAME_HOST=mvs
-      - LOCAL_MAINFRAME_PORT=3270
+     # - DEFAULT_SERVER=local1
+      - MAINFRAME_USER=HERC01
+      - MAINFRAME_PASSWORD=CUL8TR
     depends_on:
-      - mvs
+      - mvs1
+      - mvs2
+      - mvs3
+      - mvs4
 
-  mvs:
+  mvs1:
     image: rattydave/docker-ubuntu-hercules-mvs
     ports:
-      - "2323:3270"   # TN3270 (container listens on 3270, exposed as 2323)
-      - "8038:8038"   # Hercules web console (optional)
+      - "3271:3270"   # TN3270
+      - "8038:8038"   # Hercules web console
+
+  mvs2:
+    image: rattydave/docker-ubuntu-hercules-mvs
+    ports:
+      - "3272:3270"   # TN3270
+      - "8039:8038"   # Hercules web console
+
+  mvs3:
+    image: rattydave/docker-ubuntu-hercules-mvs
+    ports:
+      - "3273:3270"   # TN3270
+      - "8040:8038"   # Hercules web console
+
+  mvs4:
+    image: rattydave/docker-ubuntu-hercules-mvs
+    ports:
+      - "3274:3270"   # TN3270
+      - "8041:8038"   # Hercules web console

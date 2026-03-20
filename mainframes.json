@@ -1,25 +1,38 @@
 [
   {
-    "id": "prod",
-    "name": "Production",
-    "hostname": "mainframe.company.com",
-    "port": 23,
-    "secure": true,
-    "user": "$MAINFRAME_USER"
-  },
-  {
-    "id": "dev",
-    "name": "Development",
-    "hostname": "$DEV_MAINFRAME_HOST",
-    "port": 2323,
+    "id": "local1",
+    "name": "Local 1 (MVS1)",
+    "hostname": "mvs1",
+    "port": 3270,
     "secure": false,
-    "user": "$MAINFRAME_USER"
+    "user": "$MAINFRAME_USER",
+    "password": "$MAINFRAME_PASSWORD"
   },
   {
-    "id": "local",
-    "name": "Local (TN3270)",
-    "hostname": "${LOCAL_MAINFRAME_HOST:-127.0.0.1}",
-    "port": "${LOCAL_MAINFRAME_PORT:-2323}",
-    "secure": false
+    "id": "local2",
+    "name": "Local 2 (MVS2)",
+    "hostname": "mvs2",
+    "port": 3270,
+    "secure": false,
+    "user": "$MAINFRAME_USER",
+    "password": "$MAINFRAME_PASSWORD"
+  },
+  {
+    "id": "local3",
+    "name": "Local 3 (MVS3)",
+    "hostname": "mvs3",
+    "port": 3270,
+    "secure": false,
+    "user": "$MAINFRAME_USER",
+    "password": "$MAINFRAME_PASSWORD"
+  },
+  {
+    "id": "local4",
+    "name": "Local 4 (MVS4)",
+    "hostname": "mvs4",
+    "port": 3270,
+    "secure": false,
+    "user": "$MAINFRAME_USER",
+    "password": "$MAINFRAME_PASSWORD"
   }
 ]
