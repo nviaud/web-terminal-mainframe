@@ -20,22 +20,35 @@ window.addEventListener('resize', () => {
 term.onData(data => socket.emit('input', data));
 socket.on('output', data => term.write(data));
 
-socket.on('connected', name => {
+const SESSION_KEY = 'web3270_session';
+
+socket.on('connected', ({ name, sessionId }) => {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ sessionId, serverId: serverSelect.value, serverName: name }));
     setStatus(name, 'connected');
+    setConnected(true);
+    term.focus();
+});
+
+// Fired when the browser reconnects to an existing c3270 session after a page refresh.
+socket.on('reconnected', ({ name, buffer }) => {
+    setStatus(name, 'connected');
+    term.clear();
+    if (buffer) term.write(buffer);
+    setConnected(true);
     term.focus();
 });
 
 socket.on('disconnected', () => {
+    sessionStorage.removeItem(SESSION_KEY);
     setStatus('Disconnected', '');
     term.writeln('\r\n\x1b[33m--- Session ended ---\x1b[0m');
     setConnected(false);
-    showForm();
 });
 
 socket.on('error', msg => {
+    sessionStorage.removeItem(SESSION_KEY);
     setStatus(msg, 'error');
     setConnected(false);
-    showForm();
 });
 
 const connectBtn    = document.getElementById('connect-btn');
@@ -46,10 +59,6 @@ const serverSelect  = document.getElementById('server-select');
 function setStatus(text, cls) {
     statusEl.textContent = text;
     statusEl.className = cls;
-}
-
-function showForm() {
-    document.getElementById('connect-form').classList.remove('hidden');
 }
 
 function setConnected(connected) {
@@ -72,10 +81,23 @@ fetch('/api/init')
         serverSelect.innerHTML = servers.map(s =>
             `<option value="${s.id}">${s.name}</option>`
         ).join('');
-        if (defaultServer) {
-            document.getElementById('connect-form').classList.add('hidden');
-            connectTo(defaultServer);
+
+        // Try to reattach to an existing session from a previous page load.
+        const saved = sessionStorage.getItem(SESSION_KEY);
+        if (saved) {
+            try {
+                const { sessionId, serverId, serverName } = JSON.parse(saved);
+                if (serverId) serverSelect.value = serverId;
+                setStatus(`Reconnecting to ${serverName}…`, 'connecting');
+                setConnected(true);
+                socket.emit('connect_to_mainframe', { id: serverId, sessionId, cols: term.cols, rows: term.rows });
+                return;
+            } catch {
+                sessionStorage.removeItem(SESSION_KEY);
+            }
         }
+
+        if (defaultServer) connectTo(defaultServer);
     })
     .catch(() => {
         serverSelect.innerHTML = '<option value="">Failed to load servers</option>';
@@ -87,6 +109,7 @@ connectBtn.addEventListener('click', () => {
 });
 
 disconnectBtn.addEventListener('click', () => {
+    sessionStorage.removeItem(SESSION_KEY);
     socket.emit('connect_to_mainframe', null);
     setStatus('Disconnected', '');
     setConnected(false);

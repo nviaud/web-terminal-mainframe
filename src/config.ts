@@ -25,6 +25,26 @@ export interface MainframeEntry {
     user?: string;
     /** Optional password. Supports $VAR / ${VAR} env-var substitution. Never logged or sent as argv. */
     password?: string;
+    /**
+     * c3270 scripting actions to run after the TN3270 connection is established.
+     * Sent via c3270's -scriptport interface (proper AID-key protocol, not raw bytes).
+     * Use $USER and $PASSWORD as placeholders — they are substituted server-side.
+     * Example for TSO:
+     *   ["Wait(InputField)", "String(\"$USER\")", "Enter()",
+     *    "Wait(FieldChanged)", "Wait(InputField)", "String(\"$PASSWORD\")", "Enter()"]
+     */
+    autologin?: string[];
+    /**
+     * c3270 scripting actions to run when the user clicks Disconnect.
+     * Executed via -scriptport before c3270 is killed.
+     * Example for TSO: ["String(\"LOGOFF\")", "Enter()", "Wait(Disconnect)"]
+     */
+    autologoff?: string[];
+    /**
+     * @deprecated Use autologoff instead. Raw bytes written to the pty — unreliable.
+     * Kept for backwards compatibility only.
+     */
+    logoffSequence?: string;
 }
 
 interface ZoweProfile {

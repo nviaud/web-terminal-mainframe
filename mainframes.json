@@ -6,7 +6,19 @@
     "port": 3270,
     "secure": false,
     "user": "$MAINFRAME_USER",
-    "password": "$MAINFRAME_PASSWORD"
+    "password": "$MAINFRAME_PASSWORD",
+    "autologin": [
+      "Wait(InputField)",
+      "String(\"$USER\")",
+      "Tab()",
+      "String(\"$PASSWORD\")",
+      "Enter()"
+    ],
+    "autologoff": [
+      "String(\"LOGOFF\")",
+      "Enter()",
+      "Wait(Disconnect)"
+    ]
   },
   {
     "id": "local2",
@@ -15,7 +27,19 @@
     "port": 3270,
     "secure": false,
     "user": "$MAINFRAME_USER",
-    "password": "$MAINFRAME_PASSWORD"
+    "password": "$MAINFRAME_PASSWORD",
+    "autologin": [
+      "Wait(InputField)",
+      "String(\"$USER\")",
+      "Tab()",
+      "String(\"$PASSWORD\")",
+      "Enter()"
+    ],
+    "autologoff": [
+      "String(\"LOGOFF\")",
+      "Enter()",
+      "Wait(Disconnect)"
+    ]
   },
   {
     "id": "local3",
@@ -24,7 +48,19 @@
     "port": 3270,
     "secure": false,
     "user": "$MAINFRAME_USER",
-    "password": "$MAINFRAME_PASSWORD"
+    "password": "$MAINFRAME_PASSWORD",
+    "autologin": [
+      "Wait(InputField)",
+      "String(\"$USER\")",
+      "Tab()",
+      "String(\"$PASSWORD\")",
+      "Enter()"
+    ],
+    "autologoff": [
+      "String(\"LOGOFF\")",
+      "Enter()",
+      "Wait(Disconnect)"
+    ]
   },
   {
     "id": "local4",
@@ -33,6 +69,18 @@
     "port": 3270,
     "secure": false,
     "user": "$MAINFRAME_USER",
-    "password": "$MAINFRAME_PASSWORD"
+    "password": "$MAINFRAME_PASSWORD",
+    "autologin": [
+      "Wait(InputField)",
+      "String(\"$USER\")",
+      "Tab()",
+      "String(\"$PASSWORD\")",
+      "Enter()"
+    ],
+    "autologoff": [
+      "String(\"LOGOFF\")",
+      "Enter()",
+      "Wait(Disconnect)"
+    ]
   }
 ]

@@ -1,7 +1,9 @@
 import http from 'http';
+import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
+import { randomUUID } from 'crypto';
 import express from 'express';
 import helmet from 'helmet';
 import { Server, Socket } from 'socket.io';
@@ -18,6 +20,28 @@ interface ConnectPayload {
     id: string;
     cols: number;
     rows: number;
+    /** Session ID from a previous connection — used to reattach after a page refresh. */
+    sessionId?: string;
+}
+
+/** How long to keep a detached c3270 session alive waiting for the browser to reconnect. */
+const SESSION_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/** Maximum bytes kept in the output buffer for session replay on reconnect. */
+const OUTPUT_BUFFER_MAX = 50 * 1024; // 50 KB
+
+interface PersistentSession {
+    pty: IPty;
+    entryId: string;
+    entryName: string;
+    /** Rolling buffer of recent terminal output, replayed on reattach. */
+    outputBuffer: string;
+    /** Timer that kills the session if no browser reconnects within SESSION_TTL_MS. */
+    reattachTimer: NodeJS.Timeout | null;
+    /** The currently attached socket, or null when the browser is disconnected. */
+    attachedSocket: Socket | null;
+    /** Local TCP port of c3270's -scriptport, or null if scripting is not enabled. */
+    scriptPort: number | null;
 }
 
 /** Allowed characters in a hostname (covers DNS names, IPv4, and IPv6 bracket notation). */
@@ -67,6 +91,104 @@ function resolveC3270Binary(): string {
         logger.error('c3270 not found. Install it or set C3270_PATH=/path/to/c3270');
         process.exit(1);
     }
+}
+
+/** Interpret common C escape sequences in a string (used for legacy logoffSequence values). */
+function resolveEscapes(s: string): string {
+    return s
+        .replace(/\\r/g, '\r')
+        .replace(/\\n/g, '\n')
+        .replace(/\\t/g, '\t')
+        .replace(/\\x([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+}
+
+// ---------------------------------------------------------------------------
+// c3270 scriptport helpers
+// ---------------------------------------------------------------------------
+
+/** Find a free TCP port by briefly binding to port 0. */
+function getFreePort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+        const srv = net.createServer();
+        srv.listen(0, '127.0.0.1', () => {
+            const { port } = srv.address() as net.AddressInfo;
+            srv.close(() => resolve(port));
+        });
+        srv.on('error', reject);
+    });
+}
+
+/** Connect to c3270's scriptport, retrying until maxMs elapses (c3270 needs a moment to open it). */
+async function connectWithRetry(port: number, maxMs = 5000): Promise<net.Socket> {
+    const deadline = Date.now() + maxMs;
+    let lastErr: Error | undefined;
+    while (Date.now() < deadline) {
+        try {
+            return await new Promise<net.Socket>((resolve, reject) => {
+                const s = net.createConnection({ port, host: '127.0.0.1' });
+                s.once('connect', () => resolve(s));
+                s.once('error', reject);
+            });
+        } catch (e) {
+            lastErr = e instanceof Error ? e : new Error(String(e));
+            await new Promise(r => setTimeout(r, 200));
+        }
+    }
+    throw lastErr ?? new Error(`Cannot connect to c3270 scriptport :${port}`);
+}
+
+/**
+ * Send a list of c3270 script actions to a running scriptport.
+ * Each action is sent only after the previous one responds with "ok".
+ * Commands like Wait(Disconnect) may block for seconds — set timeoutMs accordingly.
+ */
+async function runScriptCommands(port: number, commands: string[], timeoutMs = 30_000): Promise<void> {
+    const sock = await connectWithRetry(port);
+    return new Promise<void>((resolve, reject) => {
+        let buf = '';
+        let idx = 0;
+
+        const timer = setTimeout(() => {
+            sock.destroy();
+            reject(new Error(`Script timed out after ${timeoutMs}ms on "${commands[idx]}"`));
+        }, timeoutMs);
+
+        const done = (err?: Error) => { clearTimeout(timer); sock.destroy(); err ? reject(err) : resolve(); };
+        const sendNext = () => {
+            if (idx >= commands.length) { done(); return; }
+            // TRACE includes the action text — may contain resolved credentials. Enable only in dev.
+            logger.trace({ port, action: commands[idx] }, 'Script action content');
+            sock.write(commands[idx] + '\n');
+        };
+
+        sock.on('data', chunk => {
+            buf += chunk.toString();
+            const lines = buf.split('\n');
+            buf = lines.pop() ?? '';
+            for (const line of lines) {
+                const t = line.trim();
+                if (t === 'ok') {
+                    idx++; sendNext(); return;
+                }
+                if (t.startsWith('error:')) { done(new Error(`action "${commands[idx]}": ${t}`)); return; }
+            }
+        });
+        sock.on('error', err => done(err));
+        sendNext();
+    });
+}
+
+/**
+ * Substitute $USER and $PASSWORD placeholders in script actions with the
+ * resolved entry credentials, then apply general env-var substitution.
+ */
+function resolveScriptActions(actions: string[], entry: ResolvedEntry): string[] {
+    return actions.map(a => {
+        let s = a;
+        if (entry.user)     s = s.replace(/\$(?:\{USER\}|USER\b)/g, entry.user);
+        if (entry.password) s = s.replace(/\$(?:\{PASSWORD\}|PASSWORD\b)/g, entry.password);
+        return resolveEnv(s);
+    });
 }
 
 /** Replace $VAR, ${VAR}, or ${VAR:-default} with the matching environment variable. */
@@ -200,6 +322,9 @@ app.get('/api/init', (_req, res) => {
 
 const activeSessions = new Set<IPty>();
 
+/** All sessions that are kept alive waiting for the browser to reconnect. */
+const persistentSessions = new Map<string, PersistentSession>();
+
 function killShell(s: IPty): void {
     activeSessions.delete(s);
     try { s.kill(); } catch { /* already exited */ }
@@ -212,6 +337,10 @@ function shutdown(signal: string): void {
     shuttingDown = true;
 
     logger.info(`${signal} received — killing active c3270 sessions`);
+    for (const session of persistentSessions.values()) {
+        if (session.reattachTimer) clearTimeout(session.reattachTimer);
+    }
+    persistentSessions.clear();
     for (const s of activeSessions) killShell(s);
 
     // Close Socket.IO connections first so the HTTP server can drain.
@@ -236,19 +365,79 @@ io.on('connection', (socket: Socket) => {
     logger.info({ socketId: socket.id }, 'New browser session');
 
     let shell: IPty | null = null;
+    let currentSessionId: string | null = null;
+    let currentEntryId: string | null = null;
 
     // Per-socket resize rate limiter: max 10 events per second
     let resizeCount = 0;
     let resizeWindowStart = Date.now();
 
-    socket.on('connect_to_mainframe', (payload: ConnectPayload | null) => {
+    socket.on('connect_to_mainframe', async (payload: ConnectPayload | null) => {
+        // ── Explicit disconnect ──────────────────────────────────────────────
+        if (!payload) {
+            if (shell && currentSessionId) {
+                const session = persistentSessions.get(currentSessionId);
+                const raw = currentEntryId ? registry.get(currentEntryId) : undefined;
+
+                if (session?.scriptPort && raw?.autologoff?.length) {
+                    // ── Preferred: send logoff via c3270 scriptport ──────────
+                    const actions = resolveScriptActions(raw.autologoff, resolveEntry(raw));
+                    await runScriptCommands(session.scriptPort, actions, 10_000)
+                        .catch(err => logger.warn({ sessionId: currentSessionId }, `Autologoff failed: ${err.message}`));
+
+                } else if (raw?.logoffSequence) {
+                    // ── Fallback: raw pty write (deprecated, best-effort) ────
+                    const shellToLogoff = shell;
+                    shellToLogoff.write(resolveEscapes(resolveEnv(raw.logoffSequence)));
+                    await new Promise<void>(resolve => {
+                        const timeout = setTimeout(resolve, 3000);
+                        const disposable = shellToLogoff.onExit(() => {
+                            clearTimeout(timeout); disposable.dispose(); resolve();
+                        });
+                    });
+                }
+            }
+            if (shell) { killShell(shell); shell = null; }
+            if (currentSessionId) {
+                persistentSessions.delete(currentSessionId);
+                currentSessionId = null;
+            }
+            currentEntryId = null;
+            return;
+        }
+
+        // ── Kill any shell already attached to this socket ───────────────────
         if (shell) {
             killShell(shell);
             shell = null;
+            if (currentSessionId) {
+                persistentSessions.delete(currentSessionId);
+                currentSessionId = null;
+            }
+            currentEntryId = null;
         }
 
-        if (!payload) return;
+        const cols = clamp(Math.floor(payload.cols) || 80, 20, 500);
+        const rows = clamp(Math.floor(payload.rows) || 43,  5, 200);
 
+        // ── Try to reattach to an existing persistent session ────────────────
+        if (payload.sessionId) {
+            const session = persistentSessions.get(payload.sessionId);
+            if (session) {
+                if (session.reattachTimer) { clearTimeout(session.reattachTimer); session.reattachTimer = null; }
+                session.attachedSocket = socket;
+                shell = session.pty;
+                currentSessionId = payload.sessionId;
+                currentEntryId = session.entryId;
+                try { shell.resize(cols, rows); } catch { /* already exited */ }
+                logger.info({ socketId: socket.id, sessionId: payload.sessionId }, 'Reattached to existing session');
+                socket.emit('reconnected', { name: session.entryName, buffer: session.outputBuffer });
+                return;
+            }
+            logger.info({ socketId: socket.id, sessionId: payload.sessionId }, 'Session not found — starting new connection');
+        }
+
+        // ── Spawn a new c3270 process ────────────────────────────────────────
         const raw = registry.get(payload.id);
         if (!raw) {
             socket.emit('error', `Unknown mainframe id: ${payload.id}`);
@@ -276,21 +465,22 @@ io.on('connection', (socket: Socket) => {
             return;
         }
 
-        // Clamp terminal dimensions to sane bounds
-        const cols = clamp(Math.floor(payload.cols) || 80, 20, 500);
-        const rows = clamp(Math.floor(payload.rows) || 43,  5, 200);
-
         const target = `${hostname}:${port}`;
+        const needsScriptPort = !!(entry.autologin?.length || entry.autologoff?.length);
+        const scriptPort = needsScriptPort ? await getFreePort() : null;
+
         const termArgs = [
             ...(secure ? ['-secure', ...(rejectUnauthorized ? [] : ['-noverifycert'])] : []),
             '-model', '4',
+            ...(scriptPort !== null ? ['-scriptport', String(scriptPort)] : []),
             target,
         ];
 
         logger.info({ socketId: socket.id, name: entry.name }, `Connecting to "${entry.name}"`);
 
+        let spawnedShell: IPty;
         try {
-            shell = pty.spawn(C3270_BIN, termArgs, {
+            spawnedShell = pty.spawn(C3270_BIN, termArgs, {
                 name: 'xterm-color',
                 cols,
                 rows,
@@ -304,19 +494,49 @@ io.on('connection', (socket: Socket) => {
             return;
         }
 
-        const spawnedShell = shell;
-        activeSessions.add(spawnedShell);
+        const sessionId = randomUUID();
+        const session: PersistentSession = {
+            pty: spawnedShell,
+            entryId: raw.id,
+            entryName: entry.name,
+            outputBuffer: '',
+            reattachTimer: null,
+            attachedSocket: socket,
+            scriptPort,
+        };
 
-        socket.emit('connected', entry.name);
-        spawnedShell.onData((data: string) => socket.emit('output', data));
+        shell = spawnedShell;
+        currentSessionId = sessionId;
+        currentEntryId = raw.id;
+        activeSessions.add(spawnedShell);
+        persistentSessions.set(sessionId, session);
+
+        socket.emit('connected', { name: entry.name, sessionId });
+
+        spawnedShell.onData((data: string) => {
+            session.outputBuffer += data;
+            if (session.outputBuffer.length > OUTPUT_BUFFER_MAX) {
+                session.outputBuffer = session.outputBuffer.slice(-OUTPUT_BUFFER_MAX);
+            }
+            if (session.attachedSocket) session.attachedSocket.emit('output', data);
+        });
+
         spawnedShell.onExit(({ exitCode }: { exitCode: number }) => {
             activeSessions.delete(spawnedShell);
-            logger.info({ socketId: socket.id, exitCode }, 'c3270 exited');
-            // Only clear the outer reference if it still points to THIS process.
-            // A second connect_to_mainframe may have already replaced it.
+            persistentSessions.delete(sessionId);
+            if (session.reattachTimer) clearTimeout(session.reattachTimer);
+            logger.info({ sessionId, exitCode }, 'c3270 exited');
             if (shell === spawnedShell) shell = null;
-            socket.emit('disconnected', exitCode);
+            if (session.attachedSocket) session.attachedSocket.emit('disconnected', exitCode);
         });
+
+        // Run autologin in the background — failure is non-fatal, user can log in manually.
+        if (scriptPort !== null && entry.autologin?.length) {
+            const actions = resolveScriptActions(entry.autologin, entry);
+            runScriptCommands(scriptPort, actions, 30_000)
+                .then(() => logger.info({ sessionId }, 'Autologin completed'))
+                .catch(err => logger.warn({ sessionId }, `Autologin failed: ${err.message}`));
+        }
     });
 
     socket.on('input', (data: string) => {
@@ -337,7 +557,25 @@ io.on('connection', (socket: Socket) => {
 
     socket.on('disconnect', () => {
         logger.info({ socketId: socket.id }, 'Browser session closed');
-        if (shell) { killShell(shell); shell = null; }
+        if (currentSessionId) {
+            const session = persistentSessions.get(currentSessionId);
+            if (session && session.attachedSocket === socket) {
+                // Detach socket but keep the c3270 process alive for reattachment.
+                session.attachedSocket = null;
+                const detachedSessionId = currentSessionId;
+                session.reattachTimer = setTimeout(() => {
+                    logger.info({ sessionId: detachedSessionId }, 'Session reattach timeout — killing c3270');
+                    persistentSessions.delete(detachedSessionId);
+                    killShell(session.pty);
+                }, SESSION_TTL_MS);
+                logger.info({ socketId: socket.id, sessionId: currentSessionId }, `Session detached — kept alive for ${SESSION_TTL_MS / 1000}s`);
+            }
+        } else if (shell) {
+            killShell(shell);
+        }
+        shell = null;
+        currentSessionId = null;
+        currentEntryId = null;
     });
 });
 
